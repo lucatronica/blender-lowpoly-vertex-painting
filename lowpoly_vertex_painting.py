@@ -1,6 +1,7 @@
 import bpy
+import bmesh
 from bpy_extras import view3d_utils
-from mathutils import Quaternion
+from mathutils import Quaternion, Vector
 from collections import deque
 
 
@@ -13,8 +14,6 @@ bl_info = {
     "blender": (2, 90, 0),
     "category": "3D View",
 }
-
-id_prefix = "lowpoly_vertex_painting."
 
 
 def fill_op_main(context, x, y, color, mode):
@@ -42,87 +41,83 @@ def fill_op_main(context, x, y, color, mode):
     result, location, normal, index = obj.ray_cast(ray_origin, ray_direction)
 
     if result:
-        color4 = tuple(color) + (1.0,)
+        color4 = Vector((color[0], color[1], color[2], 1.0))
         me = obj.data
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.faces.ensure_lookup_table()
+        face = bm.faces[index]
 
         if mode == "SINGLE":
-            fill_polygons(me, (index,), color4)
+            fill_faces(bm, [face], color4)
         elif mode == "CONNECTED":
-            fill_connected_polygons(me, index, color4, False)
+            fill_connected_faces(bm, [face], color4, False)
         elif mode == "CONNECTED_COLOR":
-            fill_connected_polygons(me, index, color4, True)
+            fill_connected_faces(bm, [face], color4, True)
+        
+        bm.to_mesh(me)
+        bm.free()
+        me.update()
 
     
     return result
 
+def select_linked_by_color_op_main(context):
+    me = context.edit_object.data
+    bm = bmesh.from_edit_mesh(me)
+    
+    for face in connected_faces(bm, filter(lambda face : face.select, bm.faces), True):
+        face.select = True
+    
+    bmesh.update_edit_mesh(me, destructive=False, loop_triangles=False)
+    me.update()
+
 
 # returns  a set of indices of all connected polygons
-def connected_polygons(me, polygon_index, same_color):
-    # generate edge -> polygon dictionary
-    edge_polygon_dict = dict()
+def connected_faces(bm, faces, same_color):
+    color_layer = bm.loops.layers.color.active
+    face_set = set(faces)
+    target_color = face_color(color_layer, next(iter(face_set))) if same_color else None
+    face_queue = deque(face_set);
 
-    for polygon in me.polygons:
-        for loop_index in polygon.loop_indices:
-            edge_index = me.loops[loop_index].edge_index
-            
-            if edge_index in edge_polygon_dict:
-                edge_polygon_dict[edge_index].add(polygon.index)
-            else:
-                edge_polygon_dict[edge_index] = {polygon.index}
-    
-    # breadth-first-search for related polygons
-    shared_color = polygon_color(me, polygon_index)
-    polygon_set = set((polygon_index,))
-    index_queue = deque((polygon_index,));
-
-    while len(index_queue) > 0:
-        index = index_queue.pop()
+    while len(face_queue) > 0:
+        face = face_queue.pop()
         
-        for loop_index in me.polygons[index].loop_indices:
-            for connected_index in edge_polygon_dict[me.loops[loop_index].edge_index]:
-                if connected_index not in polygon_set and (not same_color or colors_equal(me, shared_color, polygon_color(me, connected_index))):
-                    polygon_set.add(connected_index);
-                    index_queue.appendleft(connected_index)
-            
-    return polygon_set
-
-# fill connected polygons with the given color
-def fill_connected_polygons(me, polygon_index, new_color, same_color):
-    fill_polygons(me, connected_polygons(me, polygon_index, same_color), new_color)
-
-# fill the given polygons with the given color
-def fill_polygons(me, polygon_indices, new_color):
-    colors = me.vertex_colors.active.data
-    for index in polygon_indices:
-        for loop_index in me.polygons[index].loop_indices:
-            colors[loop_index].color = new_color
-
-# if two color4s are approximately equal
-def colors_equal(me, c1, c2):
-    return abs(c1[0] - c2[0]) + abs(c1[1] - c2[1]) + abs(c1[2] - c2[2]) + abs(c1[3] - c2[3]) < 0.004
-
-# average polygon color
-def polygon_color(me, polygon_index):
-    colors = me.vertex_colors.active.data
-    polygon = me.polygons[polygon_index]
-
-    r = 0.0
-    g = 0.0
-    b = 0.0
-    a = 0.0
-
-    for loop_index in polygon.loop_indices:
-        color = colors[loop_index].color
-        r += color[0]
-        g += color[1]
-        b += color[2]
-        a += color[3]
+        for edge in face.edges:
+            for connected_face in edge.link_faces:
+                if connected_face not in face_set and (not same_color or vector4_equal(target_color, face_color(color_layer, connected_face))):
+                    face_set.add(connected_face);
+                    face_queue.appendleft(connected_face)
     
-    return (r / polygon.loop_total, g / polygon.loop_total, b / polygon.loop_total, a / polygon.loop_total)
+    return face_set
+
+# get the average vertex color of a face
+def face_color(color_layer, face):
+    total = Vector((0.0, 0.0, 0.0, 0.0))
+
+    for loop in face.loops:
+        total += loop[color_layer]
+    
+    return total / len(face.loops)
+
+# if two vector4s are approximately equal
+def vector4_equal(v1, v2):
+    return (v1 - v2).length_squared < 0.004
+
+# fill connected faces with the given color
+def fill_connected_faces(bm, faces, new_color, same_color):
+    fill_faces(bm, connected_faces(bm, faces, same_color), new_color)
+
+# fill the given faces with the given color
+def fill_faces(bm, faces, new_color):
+    color_layer = bm.loops.layers.color.active
+    for face in faces:
+        for loop in face.loops:
+            loop[color_layer] = new_color
 
 
 class VertexPaintFillOperator(bpy.types.Operator):
-    bl_idname = id_prefix + "vertex_paint_fill"
+    bl_idname = "paint.vertex_fill"
     bl_label = "Vertex Paint Fill"
     bl_options = {"UNDO"}
 
@@ -162,9 +157,9 @@ class VertexPaintFillOperator(bpy.types.Operator):
 class VertexPaintFillTool(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
     bl_context_mode = "PAINT_VERTEX"
-    bl_idname = id_prefix + "vertex_paint_fill"
+    bl_idname = "vertex_paint_fill"
     bl_label = "Fill"
-    bl_description = "Fills a face with the active color"
+    bl_description = "Set vertex colors of faces using active color"
     bl_icon = "ops.paint.weight_fill"
     bl_widget = None
     bl_keymap = (
@@ -177,17 +172,40 @@ class VertexPaintFillTool(bpy.types.WorkSpaceTool):
         layout.prop(props, "mode", text="")
 
 
+class SelectLinkedFacesByVertexColor(bpy.types.Operator):
+    """Selected linked faces by vertex color."""
+    bl_idname = "mesh.select_linked_vertex_color"
+    bl_label = "Select Linked Faces by Vertex Color"
+    bl_options = {"UNDO", "REGISTER"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.edit_object
+        return (obj is not None and obj.data.total_face_sel > 0)
+
+    def execute(self, context):
+        self.report({"INFO"}, str(select_linked_by_color_op_main(context)))
+        return {"FINISHED"}
+
+def mesh_edit_select_menu_draw(self, context):
+    layout = self.layout
+    layout.operator(SelectLinkedFacesByVertexColor.bl_idname, text="Vertex Color")
+
+
 classes = (
     VertexPaintFillOperator,
+    SelectLinkedFacesByVertexColor,
 )
 
 def register():
     bpy.utils.register_tool(VertexPaintFillTool, separator=True)
+    bpy.types.VIEW3D_MT_edit_mesh_select_linked.append(mesh_edit_select_menu_draw)
     for class_ in classes:
         bpy.utils.register_class(class_)
 
 def unregister():
     bpy.utils.unregister_tool(VertexPaintFillTool)
+    bpy.types.VIEW3D_MT_edit_mesh_select_linked.remove(mesh_edit_select_menu_draw)
     for class_ in classes:
         bpy.utils.unregister_class(class_)
 

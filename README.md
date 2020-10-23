@@ -8,6 +8,9 @@
 		* Linked faces
 		* Linked faces with same color
 
+* Edit mode actions
+	* Select linked by vertex color (Select > Select Linked > Vertex Color)
+
 ## Installation
 
 1. Download [lowpoly_vertex_painting.py](lowpoly_vertex_painting.py)
