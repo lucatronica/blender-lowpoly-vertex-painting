@@ -3,6 +3,7 @@
 ## Vertex Paint tools
 
 * Fill tool
+* Face draw tool
 * Edit mode actions
 	* Select linked by vertex color (Select > Select Linked > Vertex Color)
 

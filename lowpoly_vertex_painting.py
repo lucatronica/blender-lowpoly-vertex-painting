@@ -18,6 +18,30 @@ bl_info = {
 PROP_PREFIX =  "vertex_paint_"
 FILL_COLOR = PROP_PREFIX + "fill_color"
 
+# tool state
+def get_fill_color(self):
+    return bpy.context.scene[FILL_COLOR]
+
+def set_fill_color(self, value):
+    bpy.context.scene[FILL_COLOR] = value
+
+set_fill_color(None, Color((1.0, 1.0, 1.0)))
+
+# returns (result, location, normal, index)
+def pick_vertex(context, obj, region_x, region_y):
+    # get mouse ray in object space
+    region = context.region
+    rv3d = context.region_data
+    coord = region_x, region_y
+    world_ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
+    world_ray_direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
+
+    mwi = obj.matrix_world.inverted()
+    ray_origin = mwi @ world_ray_origin
+    ray_direction = (mwi @ (world_ray_origin + world_ray_direction)) - ray_origin
+
+    # ray cast
+    return obj.ray_cast(ray_origin, ray_direction)
 
 # pick vertex color at index, using weighted average of surrounding points
 # returns (result, color4, index)
@@ -111,6 +135,7 @@ class VertexPaintColorSample(bpy.types.Operator):
     """Sample vertex color."""
     bl_idname = "paint.vertex_color_sample"
     bl_label = "Sample vertex color"
+    bl_options = {"UNDO"}
 
     x: bpy.props.IntProperty()
     y: bpy.props.IntProperty()
@@ -119,6 +144,7 @@ class VertexPaintColorSample(bpy.types.Operator):
         result, color, _ = pick_vertex_color(context, bpy.context.active_object, self.x, self.y)
         if result:
             set_fill_color(None, Color(color[:3]))
+            context.area.tag_redraw()  # make toolbar color update
         return {"FINISHED"}
     
     def invoke(self, context, event):
@@ -142,6 +168,8 @@ class VertexPaintFillOperator(bpy.types.Operator):
         default=(1.0, 1.0, 1.0),
         min=0.0,
         max=1.0,
+        get=get_fill_color,
+        set=set_fill_color,
     )
 
     tolerance: bpy.props.FloatProperty(
@@ -159,6 +187,9 @@ class VertexPaintFillOperator(bpy.types.Operator):
         description="If enabled then the fill will traverse vertex corners",
         default=False,
     )
+
+    def __init__(self):
+        print("init vertex pain :)")
 
     def execute(self, context):
         fill_op_main(context, self.x, self.y, self.color, self.tolerance, self.vertices)
@@ -192,6 +223,79 @@ def fill_op_main(context, x, y, color, tolerance, traverse_vertices):
         me.update()
 
 
+class VertexDrawFaceOperator(bpy.types.Operator):
+    bl_idname = "paint.vertex_draw_face"
+    bl_label = "Vertex Draw Face"
+    bl_options = {"UNDO"}
+
+    x: bpy.props.IntProperty()
+    y: bpy.props.IntProperty()
+
+    color: bpy.props.FloatVectorProperty(
+        name="Color",
+        description="Set's the fill color",
+        subtype="COLOR_GAMMA",
+        default=(1.0, 1.0, 1.0),
+        min=0.0,
+        max=1.0,
+        get=get_fill_color,
+        set=set_fill_color,
+    )
+
+    radius: bpy.props.IntProperty(
+        name="Radius",
+        description="The size of the brush",
+        subtype ="PIXEL",
+        default=8,
+        min=1,
+        max=500,
+    )
+
+    def invoke(self, context, event):
+        print("i've been invoked!")
+        self.x = event.mouse_region_x
+        self.y = event.mouse_region_y
+
+        draw_op_main(context, self.x, self.y, self.x, self.y, self.color, self.radius)
+
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type == "LEFTMOUSE" and event.value == "RELEASE":
+            return {"FINISHED"}
+        
+        if event.type == "MOUSEMOVE":
+            x = event.mouse_region_x
+            y = event.mouse_region_y
+            draw_op_main(context, self.x, self.y, x, y, self.color, self.radius)
+            self.x = x
+            self.y = y
+
+        return {"RUNNING_MODAL"}
+
+def draw_op_main(context, x1, y1, x2, y2, color, radius):
+    color_array = tuple(color) + (1.0,)
+    obj = context.vertex_paint_object
+
+    # dx = x1 - x2
+    # dy = y1 - y2
+    # length = sqrt(dx * dx + dy * dy)
+    # n = max(1, floor(length))
+
+    x = (x1 + x2) / 2.0
+    y = (y1 + y2) / 2.0
+
+    result, location, normal, index = pick_vertex(context, obj, x, y)
+
+    if result:
+        me = obj.data
+        colors = me.vertex_colors.active.data
+        for loop_index in me.polygons[index].loop_indices:
+            colors[loop_index].color = color_array
+        # me.update()
+
+
 class VertexPaintFillTool(bpy.types.WorkSpaceTool):
     bl_space_type = "VIEW_3D"
     bl_context_mode = "PAINT_VERTEX"
@@ -210,6 +314,26 @@ class VertexPaintFillTool(bpy.types.WorkSpaceTool):
         layout.prop(props, "color", text="")
         layout.prop(props, "tolerance")
         layout.prop(props, "vertices")
+
+
+class VertexPaintFaceDrawTool(bpy.types.WorkSpaceTool):
+    bl_space_type = "VIEW_3D"
+    bl_context_mode = "PAINT_VERTEX"
+    bl_idname = "vertex_paint_face_draw"
+    bl_label = "Face Draw"
+    bl_description = "Draw per face"
+    bl_icon = "ops.gpencil.draw.line"
+    bl_cursor = "PAINT_BRUSH"
+    bl_widget = None
+    bl_keymap = (
+        (VertexDrawFaceOperator.bl_idname, {"type": "LEFTMOUSE", "value": "PRESS"}, {}),
+        (VertexPaintColorSample.bl_idname, {"type": "S", "value": "PRESS"}, {}),
+    )
+
+    def draw_settings(context, layout, tool):
+        props = tool.operator_properties(VertexDrawFaceOperator.bl_idname)
+        layout.prop(props, "color", text="")
+        # layout.prop(props, "radius")
 
 
 class SelectLinkedFacesByVertexColor(bpy.types.Operator):
@@ -244,18 +368,21 @@ def mesh_edit_select_menu_draw(self, context):
 
 classes = (
     VertexPaintFillOperator,
+    VertexDrawFaceOperator,
     SelectLinkedFacesByVertexColor,
     VertexPaintColorSample,
 )
 
 def register():
     bpy.utils.register_tool(VertexPaintFillTool, separator=True)
+    bpy.utils.register_tool(VertexPaintFaceDrawTool)
     bpy.types.VIEW3D_MT_edit_mesh_select_linked.append(mesh_edit_select_menu_draw)
     for class_ in classes:
         bpy.utils.register_class(class_)
 
 def unregister():
     bpy.utils.unregister_tool(VertexPaintFillTool)
+    bpy.utils.unregister_tool(VertexPaintFaceDrawTool)
     bpy.types.VIEW3D_MT_edit_mesh_select_linked.remove(mesh_edit_select_menu_draw)
     for class_ in classes:
         bpy.utils.unregister_class(class_)
