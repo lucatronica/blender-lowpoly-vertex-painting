@@ -2,12 +2,7 @@
 
 ## Vertex Paint tools
 
-* Face fill tool
-	* Multiple modes:
-		* Single face
-		* Linked faces
-		* Linked faces with same color
-
+* Fill tool
 * Edit mode actions
 	* Select linked by vertex color (Select > Select Linked > Vertex Color)
 
