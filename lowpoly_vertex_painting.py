@@ -188,9 +188,6 @@ class VertexPaintFillOperator(bpy.types.Operator):
         default=False,
     )
 
-    def __init__(self):
-        print("init vertex pain :)")
-
     def execute(self, context):
         fill_op_main(context, self.x, self.y, self.color, self.tolerance, self.vertices)
         return {"FINISHED"}
@@ -252,7 +249,6 @@ class VertexDrawFaceOperator(bpy.types.Operator):
     )
 
     def invoke(self, context, event):
-        print("i've been invoked!")
         self.x = event.mouse_region_x
         self.y = event.mouse_region_y
 
@@ -293,7 +289,6 @@ def draw_op_main(context, x1, y1, x2, y2, color, radius):
         colors = me.vertex_colors.active.data
         for loop_index in me.polygons[index].loop_indices:
             colors[loop_index].color = color_array
-        # me.update()
 
 
 class VertexPaintFillTool(bpy.types.WorkSpaceTool):
@@ -337,7 +332,7 @@ class VertexPaintFaceDrawTool(bpy.types.WorkSpaceTool):
 
 
 class SelectLinkedFacesByVertexColor(bpy.types.Operator):
-    """Selected linked faces by vertex color."""
+    """Select linked faces by vertex color."""
     bl_idname = "mesh.select_linked_vertex_color"
     bl_label = "Select Linked Faces by Vertex Color"
     bl_options = {"UNDO", "REGISTER"}
@@ -358,7 +353,7 @@ def select_linked_by_color_op_main(context):
     for loop in connected_loops(bm, filter(lambda face : face.select, bm.faces), traverse_vertices=True):
         loop.vert.select = True
     
-    bmesh.update_edit_mesh(me, destructive=False, loop_triangles=False)
+    bm.select_flush(True)
     me.update()
 
 def mesh_edit_select_menu_draw(self, context):
@@ -366,10 +361,56 @@ def mesh_edit_select_menu_draw(self, context):
     layout.operator(SelectLinkedFacesByVertexColor.bl_idname, text="Vertex Color")
 
 
+class SelectSimilarByVertexColor(bpy.types.Operator):
+    """Select geometry by vertex color."""
+    bl_idname = "mesh.select_similar_vertex_color"
+    bl_label = "Select similar geometry by Vertex Color"
+    bl_options = {"UNDO", "REGISTER"}
+
+    tolerance: bpy.props.FloatProperty(
+        name="Tolerance",
+        description="Controls the similarity for colors to be considered equal. A lower value means only more similar colors will be selected",
+        subtype ="FACTOR",
+        default=0.005,
+        precision=3,
+        min=0.0,
+        max=1.0,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.edit_object
+        return (obj is not None and obj.data.total_face_sel > 0)
+
+    def execute(self, context):
+        select_similar_by_color_op_main(context, self.tolerance)
+        return {"FINISHED"}
+
+def select_similar_by_color_op_main(context, tolerance):
+    me = context.edit_object.data
+    bm = bmesh.from_edit_mesh(me)
+    color_layer = bm.loops.layers.color.active
+
+    color = face_color(bm, next(iter(filter(lambda face : face.select, bm.faces))))
+
+    for face in bm.faces:
+        for loop in face.loops:
+            if color_equal(color, loop[color_layer], tolerance):
+                loop.vert.select = True
+    
+    bm.select_flush(True)
+    me.update()
+
+def mesh_edit_select_similar_menu_draw(self, context):
+    layout = self.layout
+    layout.operator(SelectSimilarByVertexColor.bl_idname, text="Vertex Color")
+
+
 classes = (
     VertexPaintFillOperator,
     VertexDrawFaceOperator,
     SelectLinkedFacesByVertexColor,
+    SelectSimilarByVertexColor,
     VertexPaintColorSample,
 )
 
@@ -377,6 +418,7 @@ def register():
     bpy.utils.register_tool(VertexPaintFillTool, separator=True)
     bpy.utils.register_tool(VertexPaintFaceDrawTool)
     bpy.types.VIEW3D_MT_edit_mesh_select_linked.append(mesh_edit_select_menu_draw)
+    bpy.types.VIEW3D_MT_edit_mesh_select_similar.append(mesh_edit_select_similar_menu_draw)
     for class_ in classes:
         bpy.utils.register_class(class_)
 
@@ -384,6 +426,7 @@ def unregister():
     bpy.utils.unregister_tool(VertexPaintFillTool)
     bpy.utils.unregister_tool(VertexPaintFaceDrawTool)
     bpy.types.VIEW3D_MT_edit_mesh_select_linked.remove(mesh_edit_select_menu_draw)
+    bpy.types.VIEW3D_MT_edit_mesh_select_similar.remove(mesh_edit_select_similar_menu_draw)
     for class_ in classes:
         bpy.utils.unregister_class(class_)
 

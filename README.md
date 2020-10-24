@@ -1,11 +1,11 @@
 # Tools to improve low-poly vertex painting in Blender.
 
-## Vertex Paint tools
-
-* Fill tool
-* Face draw tool
+* Vertex Paint tools
+	* Fill tool
+	* Face draw tool
 * Edit mode actions
 	* Select linked by vertex color (Select > Select Linked > Vertex Color)
+	* Select similar by vertex color (Select > Select Similar > Vertex Color)
 
 ## Installation
 
