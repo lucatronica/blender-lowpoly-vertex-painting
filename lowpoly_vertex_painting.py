@@ -12,6 +12,7 @@ bl_info = {
     "author": "Luca Harris",
     "version": (1, 0),
     "wiki_url": "https://github.com/lucatronica/blender-lowpoly-vertex-painting",
+    "tracker_url": "https://github.com/lucatronica/blender-lowpoly-vertex-painting/issues",
     "blender": (2, 90, 0),
     "category": "3D View",
 }
@@ -23,7 +24,7 @@ bl_info = {
 BRUSH_FILL = "Vertex Color Fill"
 BRUSH_DRAW_FACE = "Vertex Color Draw Face"
 
-for brush_name in [BRUSH_FILL, BRUSH_DRAW_FACE]:
+def ensure_brush_exists(context, brush_name):
     if brush_name not in bpy.data.brushes:
         brush = bpy.data.brushes.new(brush_name, mode="VERTEX_PAINT")
         brush.color = Color((1.0, 1.0, 1.0))
@@ -40,27 +41,45 @@ def set_brush_active(context):
     else:
         return
 
+    ensure_brush_exists(context, brush_name) 
+
     # XXX Since we're using the "Draw" brush slot, the draw tool will try to
     # use the brush we assign as the active vertex_paint brush.
     # So try to preserve the brush for the draw tool!
-    # (Note exiting vertex paint mode while our tools are selected will cause
-    # the draw tool to equip our brush, not sure how to fix that...)
+    #
+    # Also: exiting vertex paint mode while our tools are selected will cause
+    # the draw tool to equip our brush when we enter, so if one of our brushes
+    # is selected, just revert to the Draw brush.
+    
     old_brush = context.tool_settings.vertex_paint.tool_slots[0].brush
     context.tool_settings.vertex_paint.brush = bpy.data.brushes[brush_name]
+
+    if old_brush.name in {BRUSH_FILL, BRUSH_DRAW_FACE}:
+        # Just revert to "Draw" brush, or the first brush if that was deleted.
+        # TODO preserve the actual Draw brush that the user selected.
+        old_brush = bpy.data.brushes.get("Draw") or bpy.data.brushes[0]
+
     context.tool_settings.vertex_paint.tool_slots[0].brush = old_brush
 
 # Brush color getter/setters, used in tool properties.
+# Brush is created by set_brush_active, so need to check if exists or not.
 def get_fill_color(self):
-    return bpy.data.brushes[BRUSH_FILL].color
+    brush = bpy.data.brushes.get(BRUSH_FILL)
+    return Color((1.0, 1.0, 1.0)) if brush is None else brush.color
 
 def set_fill_color(self, value):
-    bpy.data.brushes[BRUSH_FILL].color = value
+    brush = bpy.data.brushes.get(BRUSH_FILL)
+    if brush is not None:
+        brush.color = value
 
 def get_draw_face_color(self):
-    return bpy.data.brushes[BRUSH_DRAW_FACE].color
+    brush = bpy.data.brushes.get(BRUSH_DRAW_FACE)
+    return Color((1.0, 1.0, 1.0)) if brush is None else brush.color
 
 def set_draw_face_color(self, value):
-    bpy.data.brushes[BRUSH_DRAW_FACE].color = value
+    brush = bpy.data.brushes.get(BRUSH_DRAW_FACE)
+    if brush is not None:
+        brush.color = value
 
 # returns (result, location, normal, index)
 def pick_vertex(context, obj, region_x, region_y):
