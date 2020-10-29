@@ -393,7 +393,7 @@ class VertexPaintFillTool(bpy.types.WorkSpaceTool):
     bl_widget = VertexPaintToolsGizmoGroup.bl_idname
     bl_keymap = (
         (VertexPaintFillOperator.bl_idname, {"type": "LEFTMOUSE", "value": "PRESS"}, {}),
-        (VertexPaintColorSample.bl_idname, {"type": "S", "value": "PRESS"}, {}),
+        (VertexPaintColorSample.bl_idname, {"type": "S", "value": "PRESS", "shift": True}, {}),
     )
 
     icon_small = "IMAGE"
@@ -420,7 +420,7 @@ class VertexPaintDrawFaceTool(bpy.types.WorkSpaceTool):
     bl_widget = VertexPaintToolsGizmoGroup.bl_idname
     bl_keymap = (
         (VertexDrawFaceOperator.bl_idname, {"type": "LEFTMOUSE", "value": "PRESS"}, {}),
-        (VertexPaintColorSample.bl_idname, {"type": "S", "value": "PRESS"}, {}),
+        (VertexPaintColorSample.bl_idname, {"type": "S", "value": "PRESS", "shift": True}, {}),
     )
 
     icon_small = "BRUSH_DATA"
